@@ -4493,6 +4493,13 @@ static int ds5_gmsl_serdes_setup(struct ds5 *state)
 	if (err)
 		dev_err(dev, "gmsl serializer setup failed\n");
 
+	/* Extended GPIO tunneling for MAX96712A deserializer */
+	if (state->dser_ops == &max96712_interface) {
+		int tun_err = max9295_setup_gpio_tunneling(state->ser_dev);
+		if (tun_err)
+			dev_err(dev, "gmsl serializer GPIO tunneling setup failed\n");
+	}
+
 	des_err = state->dser_ops->setup_control(state->dser_dev, &state->client->dev);
 	if (des_err) {
 		dev_err(dev, "gmsl deserializer setup failed\n");
