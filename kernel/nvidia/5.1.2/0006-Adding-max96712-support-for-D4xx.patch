@@ -1,108 +1,15 @@
-From 317b49f2e4e8838181ae1804547fa1c7662d350b Mon Sep 17 00:00:00 2001
+]633;E;{ sed -n '1,14p' "$OLD512" | sed 's/ with GPIO tunneling//'\x3b sed -n '106,657p' "$OLD512"\x3b printf -- '-- \\n2.43.0\\n'\x3b } > "$DIR512/0007-Adding-max96712-support-for-D4xx.patch";9f837e99-f379-474d-ad57-9b4f15cb39a7]633;CFrom 317b49f2e4e8838181ae1804547fa1c7662d350b Mon Sep 17 00:00:00 2001
 From: ejgoldik <ehud.joseph.goldik@realsenseai.com>
 Date: Wed, 18 Feb 2026 16:30:47 +0200
-Subject: [PATCH] Adding max96712 support for D4xx with GPIO tunneling
+Subject: [PATCH] Adding max96712 support for D4xx
 
-Add MAX96712 deserializer driver support and GPIO tunneling for external sync.
-
-Includes:
-- MAX96712 driver implementation and header
-- GPIO tunneling / ESYNC register configuration for MAX9295A and MAX96712A
-- D4XX SerDes integration
+Add MAX96712 deserializer driver support for D4XX cameras.
 
 Signed-off-by: ejgoldik <ehud.joseph.goldik@realsenseai.com>
 ---
-diff --git a/drivers/media/i2c/max9295.c b/drivers/media/i2c/max9295.c
-index f1db5e369..d7226af6e 100644
---- a/drivers/media/i2c/max9295.c
-+++ b/drivers/media/i2c/max9295.c
-@@ -35,6 +35,9 @@
- #define MAX9295_SRC_CTRL_ADDR 0x2BF
- #define MAX9295_SRC_PWDN_ADDR 0x02BE
- #define MAX9295_2C0_ADDR 0x02C0
-+#define MAX9295_2C1_ADDR 0x02C1
-+#define MAX9295_2C2_ADDR 0x02C2
-+#define MAX9295_2C3_ADDR 0x02C3
- #define MAX9295_SRC_OUT_RCLK_ADDR 0x3F1
- #define MAX9295_START_PIPE_ADDR 0x311
- #define MAX9295_PIPE_EN_ADDR 0x2
-@@ -99,8 +102,12 @@
- 
- #define MAX9295_PWDN_GPIO 0x90
- #define MAX9295_PWDN_ESYNC 0x04
-+#define MAX9295_PWDN_ESYNC_EXT 0x24
- 
- #define MAX9295_2C0_ESYNC 0x57
-+#define MAX9295_2C1_ESYNC 0x05
-+#define MAX9295_2C2_ESYNC 0x1F
-+#define MAX9295_2C3_ESYNC 0x5F
- 
- #define MAX9295_MAX_PIPES 0x4
- 
-@@ -383,6 +390,49 @@ error:
- }
- EXPORT_SYMBOL(max9295_setup_control);
- 
-+int max9295_setup_gpio_tunneling(struct device *dev)
-+{
-+	struct max9295 *priv = dev_get_drvdata(dev);
-+	int err = 0;
-+	unsigned int readback = 0;
-+
-+	mutex_lock(&priv->lock);
-+
-+	dev_info(dev, "%s: writing GPIO tunneling registers\n", __func__);
-+
-+	/* Override ESYNC config for MAX96712A deserializer */
-+	max9295_write_reg(dev, MAX9295_SRC_PWDN_ADDR, MAX9295_PWDN_ESYNC_EXT);
-+	regmap_read(priv->regmap, MAX9295_SRC_PWDN_ADDR, &readback);
-+	dev_info(dev, "%s: reg 0x%04x written 0x%02x readback 0x%02x %s\n",
-+		__func__, MAX9295_SRC_PWDN_ADDR, MAX9295_PWDN_ESYNC_EXT,
-+		readback, (readback == MAX9295_PWDN_ESYNC_EXT) ? "OK" : "MISMATCH");
-+
-+	max9295_write_reg(dev, MAX9295_2C1_ADDR, MAX9295_2C1_ESYNC);
-+	regmap_read(priv->regmap, MAX9295_2C1_ADDR, &readback);
-+	dev_info(dev, "%s: reg 0x%04x written 0x%02x readback 0x%02x %s\n",
-+		__func__, MAX9295_2C1_ADDR, MAX9295_2C1_ESYNC,
-+		readback, (readback == MAX9295_2C1_ESYNC) ? "OK" : "MISMATCH");
-+
-+	max9295_write_reg(dev, MAX9295_2C2_ADDR, MAX9295_2C2_ESYNC);
-+	regmap_read(priv->regmap, MAX9295_2C2_ADDR, &readback);
-+	dev_info(dev, "%s: reg 0x%04x written 0x%02x readback 0x%02x %s\n",
-+		__func__, MAX9295_2C2_ADDR, MAX9295_2C2_ESYNC,
-+		readback, (readback == MAX9295_2C2_ESYNC) ? "OK" : "MISMATCH");
-+
-+	max9295_write_reg(dev, MAX9295_2C3_ADDR, MAX9295_2C3_ESYNC);
-+	regmap_read(priv->regmap, MAX9295_2C3_ADDR, &readback);
-+	dev_info(dev, "%s: reg 0x%04x written 0x%02x readback 0x%02x %s\n",
-+		__func__, MAX9295_2C3_ADDR, MAX9295_2C3_ESYNC,
-+		readback, (readback == MAX9295_2C3_ESYNC) ? "OK" : "MISMATCH");
-+
-+	dev_info(dev, "%s: GPIO tunneling register config done\n", __func__);
-+
-+	mutex_unlock(&priv->lock);
-+
-+	return err;
-+}
-+EXPORT_SYMBOL(max9295_setup_gpio_tunneling);
-+
- int max9295_reset_control(struct device *dev)
- {
- 	struct max9295 *priv = dev_get_drvdata(dev);
-@@ -672,6 +722,7 @@ static int max9295_remove(struct i2c_client *client)
- 
- 	if (client != NULL) {
- 		priv = dev_get_drvdata(&client->dev);
-+
- 		mutex_destroy(&priv->lock);
- 		i2c_unregister_device(client);
- 		client = NULL;
-@@ -717,4 +768,5 @@ module_exit(max9295_exit);
- 
- MODULE_DESCRIPTION("GMSL Serializer driver max9295");
- MODULE_AUTHOR("Sudhir Vyas <svyas@nvidia.com>");
-+MODULE_AUTHOR("Dmitry Perchanov <dmitry.perchanov@intel.com>");
- MODULE_LICENSE("GPL v2");
+ drivers/media/i2c/max96712.c | 319 ++++++++++++++++++++++++++++++++++-
+ 1 file changed, 317 insertions(+), 2 deletions(-)
+
 diff --git a/drivers/media/i2c/max96712.c b/drivers/media/i2c/max96712.c
 index 329a10dfd..52836c0d7 100644
 --- a/drivers/media/i2c/max96712.c
@@ -655,19 +562,5 @@ index 329a10dfd..52836c0d7 100644
  	},
  	.probe = max96712_probe,
  	.remove = max96712_remove,
-diff --git a/include/media/max9295.h b/include/media/max9295.h
-index bea15c414..6099859d2 100644
---- a/include/media/max9295.h
-+++ b/include/media/max9295.h
-@@ -99,6 +99,9 @@ int max9295_sdev_unpair(struct device *dev, struct device *s_dev);
- int max9295_setup_streaming(struct device *dev);
- 
- int max9295_init_settings(struct device *dev);
-+
-+int max9295_setup_gpio_tunneling(struct device *dev);
-+
- /** @} */
- 
- #endif  /* __MAX9295_H__ */
 -- 
 2.43.0

@@ -3,67 +3,9 @@ From: RealSense MIPI <realsense-mipi@intel.com>
 Date: Sat, 15 Mar 2025 10:00:00 +0200
 Subject: [PATCH] Adding max96712 support for D4xx
 
-Add MAX96712 deserializer driver support and GPIO tunneling for external sync.
-
-Includes:
-- MAX96712 driver implementation and header
-- GPIO tunneling / ESYNC register configuration for MAX9295A and MAX96712A
-- D4XX SerDes integration
+Add MAX96712 deserializer driver support for D4XX cameras.
 
 ---
-diff --git a/drivers/media/i2c/max9295.c b/drivers/media/i2c/max9295.c
-index 40568147..eff47e1d 100644
---- a/drivers/media/i2c/max9295.c
-+++ b/drivers/media/i2c/max9295.c
-@@ -25,6 +25,9 @@
- #define MAX9295_SRC_CTRL_ADDR 0x2BF
- #define MAX9295_SRC_PWDN_ADDR 0x02BE
- #define MAX9295_2C0_ADDR 0x02C0
-+#define MAX9295_2C1_ADDR 0x02C1
-+#define MAX9295_2C2_ADDR 0x02C2
-+#define MAX9295_2C3_ADDR 0x02C3
- #define MAX9295_SRC_OUT_RCLK_ADDR 0x3F1
- #define MAX9295_START_PIPE_ADDR 0x311
- #define MAX9295_PIPE_EN_ADDR 0x2
-@@ -89,8 +92,12 @@
- 
- #define MAX9295_PWDN_GPIO 0x90
- #define MAX9295_PWDN_ESYNC 0x04
-+#define MAX9295_PWDN_ESYNC_EXT 0x24
- 
- #define MAX9295_2C0_ESYNC 0x57
-+#define MAX9295_2C1_ESYNC 0x05
-+#define MAX9295_2C2_ESYNC 0x1F
-+#define MAX9295_2C3_ESYNC 0x5F
- 
- #define MAX9295_MAX_PIPES 0x4
- 
-@@ -373,6 +380,25 @@ error:
- }
- EXPORT_SYMBOL(max9295_setup_control);
- 
-+int max9295_setup_gpio_tunneling(struct device *dev)
-+{
-+	struct max9295 *priv = dev_get_drvdata(dev);
-+	int err = 0;
-+
-+	mutex_lock(&priv->lock);
-+
-+	/* Override ESYNC config for MAX96712A deserializer */
-+	max9295_write_reg(dev, MAX9295_SRC_PWDN_ADDR, MAX9295_PWDN_ESYNC_EXT);
-+	max9295_write_reg(dev, MAX9295_2C1_ADDR, MAX9295_2C1_ESYNC);
-+	max9295_write_reg(dev, MAX9295_2C2_ADDR, MAX9295_2C2_ESYNC);
-+	max9295_write_reg(dev, MAX9295_2C3_ADDR, MAX9295_2C3_ESYNC);
-+
-+	mutex_unlock(&priv->lock);
-+
-+	return err;
-+}
-+EXPORT_SYMBOL(max9295_setup_gpio_tunneling);
-+
- int max9295_reset_control(struct device *dev)
- {
- 	struct max9295 *priv = dev_get_drvdata(dev);
 diff --git a/drivers/media/i2c/max96712.c b/drivers/media/i2c/max96712.c
 index 8e237eef..33646ace 100644
 --- a/drivers/media/i2c/max96712.c
@@ -648,17 +590,5 @@ index 8e237eef..33646ace 100644
  	},
  	.probe = max96712_probe,
  	.remove = max96712_remove,
-diff --git a/include/media/max9295.h b/include/media/max9295.h
-index c576e3e5..1acfe0fe 100644
---- a/include/media/max9295.h
-+++ b/include/media/max9295.h
-@@ -86,6 +86,9 @@ int max9295_sdev_unpair(struct device *dev, struct device *s_dev);
- int max9295_setup_streaming(struct device *dev);
- 
- int max9295_init_settings(struct device *dev);
-+
-+int max9295_setup_gpio_tunneling(struct device *dev);
-+
- /** @} */
- 
- #endif  /* __MAX9295_H__ */
+-- 
+2.43.0
