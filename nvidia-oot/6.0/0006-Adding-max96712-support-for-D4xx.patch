@@ -1,20 +1,20 @@
-From d573187d3232bc64ec399d309ef363d32a1dafe8 Mon Sep 17 00:00:00 2001
+From eb98093f83475f9d16abb29f1a30899ebf924292 Mon Sep 17 00:00:00 2001
 From: ejgoldik <ehud.joseph.goldik@realsenseai.com>
-Date: Wed, 25 Mar 2026 11:59:22 +0200
+Date: Wed, 25 Mar 2026 15:36:14 +0200
 Subject: [PATCH] Adding max96712 support for D4xx
 
 Add MAX96712 deserializer driver support for D4XX cameras.
 
 Signed-off-by: ejgoldik <ehud.joseph.goldik@realsenseai.com>
 ---
- drivers/media/i2c/max96712.c | 534 ++++++++++++++++++++++++++++++++---
- 1 file changed, 497 insertions(+), 37 deletions(-)
+ drivers/media/i2c/max96712.c | 538 ++++++++++++++++++++++++++++++++---
+ 1 file changed, 501 insertions(+), 37 deletions(-)
 
 diff --git a/drivers/media/i2c/max96712.c b/drivers/media/i2c/max96712.c
-index 8e237eef..01cdd28a 100644
+index 8e237eef..1dca25e5 100644
 --- a/drivers/media/i2c/max96712.c
 +++ b/drivers/media/i2c/max96712.c
-@@ -16,32 +16,91 @@
+@@ -16,32 +16,92 @@
  #include <linux/gpio.h>
  #include <linux/of.h>
  #include <linux/of_gpio.h>
@@ -38,6 +38,7 @@ index 8e237eef..01cdd28a 100644
 +#define MAX96712_315_ESYNC 0x07
 +
 +#define MAX96712_REG6_ADDR 0x6
++#define MAX96712_PWR1_ADDR 0x13
 +#define MAX96712_CTRL1_ADDR 0x18
 +
 +#define MAX96712_BACKTOP25_ADDR 0x418
@@ -112,7 +113,7 @@ index 8e237eef..01cdd28a 100644
  	i2c_client = global_priv[channel]->i2c_client;
  	bak = i2c_client->addr;
  
-@@ -53,7 +112,6 @@ int max96712_write_reg_Dser(int slaveAddr, int channel,
+@@ -53,7 +113,6 @@ int max96712_write_reg_Dser(int slaveAddr, int channel,
  		dev_err(&i2c_client->dev, "%s: addr = 0x%x, val = 0x%x\n",
  				__func__, addr, val);
  	}
@@ -120,7 +121,7 @@ index 8e237eef..01cdd28a 100644
  	return err;
  }
  EXPORT_SYMBOL(max96712_write_reg_Dser);
-@@ -68,8 +126,6 @@ int max96712_read_reg_Dser(int slaveAddr, int channel,
+@@ -68,8 +127,6 @@ int max96712_read_reg_Dser(int slaveAddr, int channel,
  
  	if (channel > 3 || channel < 0 || global_priv[channel] == NULL)
  		return -1;
@@ -129,7 +130,7 @@ index 8e237eef..01cdd28a 100644
  	i2c_client = global_priv[channel]->i2c_client;
  	bak = i2c_client->addr;
  	i2c_client->addr = slaveAddr / 2;
-@@ -80,11 +136,56 @@ int max96712_read_reg_Dser(int slaveAddr, int channel,
+@@ -80,11 +137,56 @@ int max96712_read_reg_Dser(int slaveAddr, int channel,
  		dev_err(&i2c_client->dev, "%s: addr = 0x%x, val = 0x%x\n",
  				__func__, addr, *val);
  	}
@@ -187,7 +188,7 @@ index 8e237eef..01cdd28a 100644
  static int max96712_read_reg(struct max96712 *priv,
  			u16 addr, unsigned int *val)
  {
-@@ -99,6 +200,20 @@ static int max96712_read_reg(struct max96712 *priv,
+@@ -99,6 +201,20 @@ static int max96712_read_reg(struct max96712 *priv,
  	return err;
  }
  
@@ -208,7 +209,7 @@ index 8e237eef..01cdd28a 100644
  
  static int max96712_stats_show(struct seq_file *s, void *data)
  {
-@@ -153,24 +268,6 @@ static const struct file_operations max96712_debugfs_fops = {
+@@ -153,24 +269,6 @@ static const struct file_operations max96712_debugfs_fops = {
  	.release = single_release,
  };
  
@@ -233,7 +234,7 @@ index 8e237eef..01cdd28a 100644
  static int max96712_debugfs_init(const char *dir_name,
  				struct dentry **d_entry,
  				struct dentry **f_entry,
-@@ -225,7 +322,8 @@ static int max96712_debugfs_init(const char *dir_name,
+@@ -225,7 +323,8 @@ static int max96712_debugfs_init(const char *dir_name,
  static  struct regmap_config max96712_regmap_config = {
  	.reg_bits = 16,
  	.val_bits = 8,
@@ -243,7 +244,7 @@ index 8e237eef..01cdd28a 100644
  };
  
  #if defined(NV_I2C_DRIVER_STRUCT_PROBE_WITHOUT_I2C_DEVICE_ID_ARG) /* Linux 6.3 */
-@@ -237,6 +335,8 @@ static int max96712_probe(struct i2c_client *client,
+@@ -237,6 +336,8 @@ static int max96712_probe(struct i2c_client *client,
  {
  	struct max96712 *priv;
  	int err = 0;
@@ -252,7 +253,7 @@ index 8e237eef..01cdd28a 100644
  
  	dev_info(&client->dev, "%s: enter\n", __func__);
  
-@@ -249,15 +349,31 @@ static int max96712_probe(struct i2c_client *client,
+@@ -249,15 +350,31 @@ static int max96712_probe(struct i2c_client *client,
  			"regmap init failed: %ld\n", PTR_ERR(priv->regmap));
  		return -ENODEV;
  	}
@@ -290,7 +291,7 @@ index 8e237eef..01cdd28a 100644
  	err = max96712_debugfs_init(NULL, NULL, NULL, priv);
  	if (err)
  		return err;
-@@ -274,8 +390,11 @@ static int max96712_remove(struct i2c_client *client)
+@@ -274,8 +391,11 @@ static int max96712_remove(struct i2c_client *client)
  static void max96712_remove(struct i2c_client *client)
  #endif
  {
@@ -303,7 +304,7 @@ index 8e237eef..01cdd28a 100644
  		i2c_unregister_device(client);
  		client = NULL;
  	}
-@@ -284,13 +403,353 @@ static void max96712_remove(struct i2c_client *client)
+@@ -284,13 +404,356 @@ static void max96712_remove(struct i2c_client *client)
  #endif
  }
  
@@ -642,6 +643,9 @@ index 8e237eef..01cdd28a 100644
 +        gpio_direction_output(priv->pwdn_gpio, 1);
 +        gpio_set_value(priv->pwdn_gpio, 0);
 +        msleep(100);
++    } else {
++        max96712_write_reg(priv, MAX96712_PWR1_ADDR, 0x40);
++        msleep(200);
 +    }
 +    return;
 +}
@@ -658,7 +662,7 @@ index 8e237eef..01cdd28a 100644
  	{ },
  };
  
-@@ -300,6 +759,7 @@ static struct i2c_driver max96712_i2c_driver = {
+@@ -300,6 +763,7 @@ static struct i2c_driver max96712_i2c_driver = {
  	.driver = {
  		.name = "max96712",
  		.owner = THIS_MODULE,
