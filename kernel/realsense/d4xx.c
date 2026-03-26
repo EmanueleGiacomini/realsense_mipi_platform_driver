@@ -569,7 +569,7 @@ struct dser_control {
 };
 static struct dser_control dser_inited[MAX_DSER_NUM];
 
-#define MAX_DS5_NUM (MAX_DSER_NUM * 4) /* assuming max 2 DS5 cameras per deserializer */
+#define MAX_DS5_NUM (MAX_DSER_NUM * 4) /* assuming max 4 DS5 cameras per deserializer (true for max96712) */
 static struct ds5_dev ds5_inited[MAX_DS5_NUM];
 
 static void ds5_init_global_slots_once(void)
@@ -1825,12 +1825,9 @@ static int ds5_setup_pipeline(struct ds5 *state, u8 data_type1, u8 data_type2,
 	 * The ser_pipe to dser_pipe mapping depends on the deserializer.
 	 */
 	int ser_vc_id = vc_id % DS5_MAX_STREAMS;
-	int ser_pipe_id = state->dser_ops->get_ser_pipe_id(state->dser_dev, pipe_id, ser_vc_id);;
+	int ser_pipe_id = state->dser_ops->get_ser_pipe_id(state->dser_dev, pipe_id, ser_vc_id);
 
-	if (state->dser_ops->bind_ser_to_dser_pipe != NULL)
-	{
-		ret |= state->dser_ops->bind_ser_to_dser_pipe(state->dser_dev, pipe_id, ser_pipe_id, vc_id);
-	}
+	ret |= state->dser_ops->bind_ser_to_dser_pipe(state->dser_dev, pipe_id, ser_pipe_id, vc_id);
 	dev_dbg(&state->client->dev,
 			"set ser pipe %d, dser pipe %d, data_type1: 0x%x, data_type2: 0x%x, ser_vc_id: %u, vc_id: %u\n",
 			ser_pipe_id, pipe_id, data_type1, data_type2, ser_vc_id, vc_id);
