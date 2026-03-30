@@ -46,6 +46,9 @@
 struct dser_interface {
 	/* Pipeline management */
 	int (*get_available_pipe_id)(struct device *dev, int vc_id);
+	int (*get_ser_pipe_id)(struct device *dev, int dser_pipe_id, int vc_id);
+	int (*bind_ser_to_dser_pipe)(struct device *dev, int dser_pipe_id, int ser_pipe_id, u32 vc_id);
+
 	int (*set_pipe)(struct device *dev, int pipe_id, u8 data_type1, u8 data_type2, u32 vc_id);
 	int (*release_pipe)(struct device *dev, int pipe_id);
 	void (*reset_oneshot)(struct device *dev);
@@ -63,7 +66,7 @@ struct dser_interface {
 	int (*power_on)(struct device *dev);
 	void (*power_off)(struct device *dev);
 	int (*init_settings)(struct device *dev);
-	
+
 	/* Identification */
 	const char *name;
 };
@@ -566,7 +569,7 @@ struct dser_control {
 };
 static struct dser_control dser_inited[MAX_DSER_NUM];
 
-#define MAX_DS5_NUM (MAX_DSER_NUM * 2) /* assuming max 2 DS5 cameras per deserializer */
+#define MAX_DS5_NUM (MAX_DSER_NUM * 4) /* assuming max 4 DS5 cameras per deserializer (true for max96712) */
 static struct ds5_dev ds5_inited[MAX_DS5_NUM];
 
 static void ds5_init_global_slots_once(void)
@@ -599,6 +602,8 @@ static inline atomic_t *dser_get_reset_gen(struct ds5 *state)
 /* MAX9296 deserializer interface implementation */
 static const struct dser_interface max9296_interface = {
 	.get_available_pipe_id = max9296_get_available_pipe_id,
+	.get_ser_pipe_id = max9296_get_ser_pipe_id,
+	.bind_ser_to_dser_pipe = max9296_bind_ser_to_dser_pipe,
 	.set_pipe = max9296_set_pipe,
 	.release_pipe = max9296_release_pipe,
 	.reset_oneshot = max9296_reset_oneshot,
@@ -616,6 +621,8 @@ static const struct dser_interface max9296_interface = {
 /* MAX96712 deserializer interface implementation */
 static const struct dser_interface max96712_interface = {
 	.get_available_pipe_id = max96712_get_available_pipe_id,
+	.get_ser_pipe_id = max96712_get_ser_pipe_id,
+	.bind_ser_to_dser_pipe = max96712_bind_ser_to_dser_pipe,
 	.set_pipe = max96712_set_pipe,
 	.release_pipe = max96712_release_pipe,
 	.reset_oneshot = max96712_reset_oneshot,
@@ -1813,12 +1820,14 @@ static int ds5_setup_pipeline(struct ds5 *state, u8 data_type1, u8 data_type2,
 	int ret = 0;
 	/* While some deserializers can support up to 8 pipes, the serializer only supports
 	 * four pipes and four vc_ids (0 - 3).
-	 * In this case, a second camera connected to a deserializer, will have its pipes 0 - 3
-	 * with vc_id 0 - 3 connected to the deserializer's pipes 4 - 7 and vc_ids 4 - 7
+	 * To use multiple cameras under this restriction, a second camera connected
+	 * to a deserializer will have its vc_id 0 - 3 mapped to outside vc_id 4 - 7 etc.
+	 * The ser_pipe to dser_pipe mapping depends on the deserializer.
 	 */
-	int ser_pipe_id = pipe_id % DS5_MAX_STREAMS;
 	int ser_vc_id = vc_id % DS5_MAX_STREAMS;
+	int ser_pipe_id = state->dser_ops->get_ser_pipe_id(state->dser_dev, pipe_id, ser_vc_id);
 
+	ret |= state->dser_ops->bind_ser_to_dser_pipe(state->dser_dev, pipe_id, ser_pipe_id, vc_id);
 	dev_dbg(&state->client->dev,
 			"set ser pipe %d, dser pipe %d, data_type1: 0x%x, data_type2: 0x%x, ser_vc_id: %u, vc_id: %u\n",
 			ser_pipe_id, pipe_id, data_type1, data_type2, ser_vc_id, vc_id);
@@ -5183,6 +5192,10 @@ retry_after_serdes_recovery:
 		if (!ds5_config_done) {
 			ret = ds5_configure(state);
 			if (ret < 0) {
+				if (ret == -ENOSR) {
+					/* No recovery can help if no resources are available */
+					return ret;
+				}
 				dev_warn(&state->client->dev, "stream %d config failed, retry %d\n",
 					stream_id, i);
 				continue;

@@ -24,6 +24,7 @@
  */
 
 int max96712_get_available_pipe_id(struct device *dev, int vc_id);
+int max96712_get_ser_pipe_id(struct device *dev, int dser_pipe_id, int vc_id);
 int max96712_set_pipe(struct device *dev, int pipe_id, u8 data_type1,
 		     u8 data_type2, u32 vc_id);
 int max96712_release_pipe(struct device *dev, int pipe_id);
@@ -36,5 +37,14 @@ int max96712_sdev_unregister(struct device *dev, struct device *s_dev);
 int max96712_power_on(struct device *dev);
 void max96712_power_off(struct device *dev);
 int max96712_init_settings(struct device *dev);
+/**
+ * @brief  Maps dserializer to serializer pipe id
+ *
+ * @param [in]  dev             The deserializer device handle.
+ * @param [in]  dser_pipe_id    Deserializer pipe id.
+ * @param [in]  ser_pipe_id     Serializer pipe id.
+ * @param [in]  vc_id           vc_id associated with this pipe path.
+ */
+int max96712_bind_ser_to_dser_pipe(struct device *dev, int dser_pipe_id, int ser_pipe_id, u32 vc_id);
 
 #endif  /* __MAX96712_H__ */

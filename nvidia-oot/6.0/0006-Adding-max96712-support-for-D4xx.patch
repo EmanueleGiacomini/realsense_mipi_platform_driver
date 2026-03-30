@@ -1,16 +1,20 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: RealSense MIPI <realsense-mipi@intel.com>
-Date: Sat, 15 Mar 2025 10:00:00 +0200
+From 0273a0938bb1e2242f8b68e0167175a0a99f17f9 Mon Sep 17 00:00:00 2001
+From: ejgoldik <ehud.joseph.goldik@realsenseai.com>
+Date: Thu, 26 Mar 2026 15:49:47 +0200
 Subject: [PATCH] Adding max96712 support for D4xx
 
 Add MAX96712 deserializer driver support for D4XX cameras.
 
+Signed-off-by: ejgoldik <ehud.joseph.goldik@realsenseai.com>
 ---
+ drivers/media/i2c/max96712.c | 563 ++++++++++++++++++++++++++++++++---
+ 1 file changed, 526 insertions(+), 37 deletions(-)
+
 diff --git a/drivers/media/i2c/max96712.c b/drivers/media/i2c/max96712.c
-index 8e237eef..33646ace 100644
+index 8e237eef..c4577bbb 100644
 --- a/drivers/media/i2c/max96712.c
 +++ b/drivers/media/i2c/max96712.c
-@@ -16,32 +16,89 @@
+@@ -16,32 +16,93 @@
  #include <linux/gpio.h>
  #include <linux/of.h>
  #include <linux/of_gpio.h>
@@ -34,6 +38,8 @@ index 8e237eef..33646ace 100644
 +#define MAX96712_315_ESYNC 0x07
 +
 +#define MAX96712_REG6_ADDR 0x6
++#define MAX96712_PWR1_ADDR 0x13
++#define MAX96712_PWR1_RESET_ALL_VAL 0x40
 +#define MAX96712_CTRL1_ADDR 0x18
 +
 +#define MAX96712_BACKTOP25_ADDR 0x418
@@ -75,6 +81,7 @@ index 8e237eef..33646ace 100644
 +/* data defines */
 +#define MAX96712_MAX_LINKS 4
 +#define MAX96712_MAX_PIPES 8
++#define MAX9295_MAX_STREAMS 4
  
  struct max96712 {
  	struct i2c_client *i2c_client;
@@ -83,6 +90,7 @@ index 8e237eef..33646ace 100644
 +	struct mutex lock;
 +	int pwdn_gpio;
 +	int link_mask;
++	bool video_pipe_alloc[MAX96712_MAX_PIPES];
  };
  static struct max96712 *global_priv[4];
  
@@ -106,7 +114,7 @@ index 8e237eef..33646ace 100644
  	i2c_client = global_priv[channel]->i2c_client;
  	bak = i2c_client->addr;
  
-@@ -53,7 +110,6 @@ int max96712_write_reg_Dser(int slaveAddr, int channel,
+@@ -53,7 +114,6 @@ int max96712_write_reg_Dser(int slaveAddr, int channel,
  		dev_err(&i2c_client->dev, "%s: addr = 0x%x, val = 0x%x\n",
  				__func__, addr, val);
  	}
@@ -114,7 +122,7 @@ index 8e237eef..33646ace 100644
  	return err;
  }
  EXPORT_SYMBOL(max96712_write_reg_Dser);
-@@ -68,8 +124,6 @@ int max96712_read_reg_Dser(int slaveAddr, int channel,
+@@ -68,8 +128,6 @@ int max96712_read_reg_Dser(int slaveAddr, int channel,
  
  	if (channel > 3 || channel < 0 || global_priv[channel] == NULL)
  		return -1;
@@ -123,7 +131,7 @@ index 8e237eef..33646ace 100644
  	i2c_client = global_priv[channel]->i2c_client;
  	bak = i2c_client->addr;
  	i2c_client->addr = slaveAddr / 2;
-@@ -80,11 +134,56 @@ int max96712_read_reg_Dser(int slaveAddr, int channel,
+@@ -80,11 +138,56 @@ int max96712_read_reg_Dser(int slaveAddr, int channel,
  		dev_err(&i2c_client->dev, "%s: addr = 0x%x, val = 0x%x\n",
  				__func__, addr, *val);
  	}
@@ -146,8 +154,8 @@ index 8e237eef..33646ace 100644
 +	i2c_client->addr = bak;
 +
 +	if (err)
-+		dev_err(&i2c_client->dev, "%s:i2c read failed, 0x%x = %x\n",
-+			__func__, addr, value);
++		dev_err(&i2c_client->dev, "%s:i2c read failed, 0x%x: 0x%x\n",
++			__func__, ShortSlaveAddr, addr);
 +	usleep_range(100, 110);
 +	*val = value;
 +	mutex_unlock(&priv->lock);
@@ -168,8 +176,8 @@ index 8e237eef..33646ace 100644
 +	i2c_client->addr = bak;
 +
 +	if (err)
-+		dev_err(&i2c_client->dev, "%s:i2c write failed, 0x%x = %x\n",
-+			__func__, addr, val);
++		dev_err(&i2c_client->dev, "%s:i2c write failed, 0x%x: 0x%x = %x\n",
++			__func__, ShortSlaveAddr, addr, val);
 +
 +	/* delay before next i2c command as required for SERDES link */
 +	usleep_range(100, 110);
@@ -181,7 +189,7 @@ index 8e237eef..33646ace 100644
  static int max96712_read_reg(struct max96712 *priv,
  			u16 addr, unsigned int *val)
  {
-@@ -99,6 +198,20 @@ static int max96712_read_reg(struct max96712 *priv,
+@@ -99,6 +202,20 @@ static int max96712_read_reg(struct max96712 *priv,
  	return err;
  }
  
@@ -202,7 +210,7 @@ index 8e237eef..33646ace 100644
  
  static int max96712_stats_show(struct seq_file *s, void *data)
  {
-@@ -153,24 +266,6 @@ static const struct file_operations max96712_debugfs_fops = {
+@@ -153,24 +270,6 @@ static const struct file_operations max96712_debugfs_fops = {
  	.release = single_release,
  };
  
@@ -227,7 +235,7 @@ index 8e237eef..33646ace 100644
  static int max96712_debugfs_init(const char *dir_name,
  				struct dentry **d_entry,
  				struct dentry **f_entry,
-@@ -225,7 +320,8 @@ static int max96712_debugfs_init(const char *dir_name,
+@@ -225,7 +324,8 @@ static int max96712_debugfs_init(const char *dir_name,
  static  struct regmap_config max96712_regmap_config = {
  	.reg_bits = 16,
  	.val_bits = 8,
@@ -237,7 +245,7 @@ index 8e237eef..33646ace 100644
  };
  
  #if defined(NV_I2C_DRIVER_STRUCT_PROBE_WITHOUT_I2C_DEVICE_ID_ARG) /* Linux 6.3 */
-@@ -237,6 +333,8 @@ static int max96712_probe(struct i2c_client *client,
+@@ -237,6 +337,8 @@ static int max96712_probe(struct i2c_client *client,
  {
  	struct max96712 *priv;
  	int err = 0;
@@ -246,7 +254,7 @@ index 8e237eef..33646ace 100644
  
  	dev_info(&client->dev, "%s: enter\n", __func__);
  
-@@ -249,15 +347,31 @@ static int max96712_probe(struct i2c_client *client,
+@@ -249,15 +351,31 @@ static int max96712_probe(struct i2c_client *client,
  			"regmap init failed: %ld\n", PTR_ERR(priv->regmap));
  		return -ENODEV;
  	}
@@ -284,7 +292,7 @@ index 8e237eef..33646ace 100644
  	err = max96712_debugfs_init(NULL, NULL, NULL, priv);
  	if (err)
  		return err;
-@@ -274,8 +388,11 @@ static int max96712_remove(struct i2c_client *client)
+@@ -274,8 +392,11 @@ static int max96712_remove(struct i2c_client *client)
  static void max96712_remove(struct i2c_client *client)
  #endif
  {
@@ -297,7 +305,7 @@ index 8e237eef..33646ace 100644
  		i2c_unregister_device(client);
  		client = NULL;
  	}
-@@ -284,13 +401,283 @@ static void max96712_remove(struct i2c_client *client)
+@@ -284,13 +405,380 @@ static void max96712_remove(struct i2c_client *client)
  #endif
  }
  
@@ -322,19 +330,89 @@ index 8e237eef..33646ace 100644
 +
 +int max96712_get_available_pipe_id(struct device *dev, int vc_id)
 +{
-+	/* TODO EHUD: Currently vc_id == pipe id but that's definitely
-+	 * not the end goal if we plan to support more than two cameras
-+	 */
-+	return vc_id;
++	int i;
++	int pipe_id = -ENOSR;
++	struct max96712 *priv = dev_get_drvdata(dev);
++
++	mutex_lock(&priv->lock);
++	for (i = 0; i < MAX96712_MAX_PIPES; i++) {
++		if (priv->video_pipe_alloc[i] == false) {
++			priv->video_pipe_alloc[i] = true;
++			pipe_id = i;
++			break;
++		}
++	}
++	mutex_unlock(&priv->lock);
++
++	return pipe_id;
 +}
 +EXPORT_SYMBOL(max96712_get_available_pipe_id);
 +
++static int __max96712_bind_ser_to_dser_pipe(struct device *dev, int dser_pipe_id, int ser_pipe_id, u32 vc_id)
++{
++	struct max96712 *priv = dev_get_drvdata(dev);
++	unsigned int pipe_sel_val = 0;
++	u32 link_id = vc_id / MAX9295_MAX_STREAMS;
++	int err = 0;
++
++	/* dser_pipe_id will be connected to ser_pipe_id of link_id */
++	uint8_t map_pipe_val = link_id << 2 | ser_pipe_id;
++
++	/* Every pipe select reg handles two pipe mappings */
++	uint32_t dser_pipe_sel_addr = MAX96712_VIDEO_PIPE_SEL_0_ADDR + (dser_pipe_id / 2);
++	uint32_t dser_pipe_sel_offset = 4 * (dser_pipe_id % 2);
++	uint8_t dser_pipe_sel_mask = 0xF << dser_pipe_sel_offset;
++
++	if (dser_pipe_id < 0 || dser_pipe_id >= MAX96712_MAX_PIPES || link_id >= MAX96712_MAX_LINKS)
++		return -EINVAL;
++
++	err = max96712_read_reg(priv, dser_pipe_sel_addr, &pipe_sel_val);
++	if (err == 0) {
++		/* Zero the pipe we are interested in */
++		pipe_sel_val &= ~(dser_pipe_sel_mask);
++		/* Input the new value */
++		pipe_sel_val |= (map_pipe_val << dser_pipe_sel_offset);
++
++		err = max96712_write_reg(priv, dser_pipe_sel_addr, pipe_sel_val);
++	}
++
++	return err;
++}
++
 +int max96712_release_pipe(struct device *dev, int pipe_id)
 +{
-+	/* TODO EHUD: once pipe allocation is added, free here */
-+	return 0;
++	struct max96712 *priv = dev_get_drvdata(dev);
++	unsigned int pipe_en_val = 0;
++	int err = 0;
++
++	if (pipe_id < 0 || pipe_id >= MAX96712_MAX_PIPES)
++		return -EINVAL;
++
++	mutex_lock(&priv->lock);
++	priv->video_pipe_alloc[pipe_id] = false;
++
++	err = max96712_read_reg(priv, MAX96712_VIDEO_PIPE_EN_ADDR, &pipe_en_val);
++	if (err == 0) {
++		pipe_en_val &= ~(1 << pipe_id);
++		err = max96712_write_reg(priv, MAX96712_VIDEO_PIPE_EN_ADDR, pipe_en_val);
++	}
++
++	if (err == 0) {
++		err = __max96712_bind_ser_to_dser_pipe(dev, pipe_id, 0, 0);
++	}
++
++	mutex_unlock(&priv->lock);
++
++	return err;
 +}
 +EXPORT_SYMBOL(max96712_release_pipe);
++
++int max96712_get_ser_pipe_id(struct device *dev, int dser_pipe_id, int vc_id)
++{
++	/* When paired with max96712, max9295 has a 1:1 ser_vc_id to ser_pipe_id mapping */
++	return vc_id;
++}
++EXPORT_SYMBOL(max96712_get_ser_pipe_id);
 +
 +void max96712_reset_oneshot(struct device *dev)
 +{
@@ -351,6 +429,7 @@ index 8e237eef..33646ace 100644
 +	struct max96712 *priv = dev_get_drvdata(dev);
 +	int vc_id_lsb = vc_id & 0x3;
 +	int vc_id_msb = vc_id >> 2;
++	unsigned int pipe_en_val = 0;
 +
 +	struct reg_pair map_pipe_control[] = {
 +		// Enable 3/4 mappings for video pipe (4 if metadata enabled)
@@ -385,9 +464,16 @@ index 8e237eef..33646ace 100644
 +
 +	err |= max96712_set_registers(priv, map_pipe_control,
 +				     ARRAY_SIZE(map_pipe_control));
-+
++	if (err) {
++		return err;
++	}
 +	max96712_reset_oneshot(dev);
-+	max96712_write_reg(priv, MAX96712_VIDEO_PIPE_EN_ADDR, 0xFF);
++
++	err |= max96712_read_reg(priv, MAX96712_VIDEO_PIPE_EN_ADDR, &pipe_en_val);
++	if (err == 0) {
++		pipe_en_val |= (1 << pipe_id);
++		err |= max96712_write_reg(priv, MAX96712_VIDEO_PIPE_EN_ADDR, pipe_en_val);
++	}
 +
 +	return err;
 +}
@@ -398,11 +484,11 @@ index 8e237eef..33646ace 100644
 +	struct max96712 *priv = dev_get_drvdata(dev);
 +	struct reg_pair map_pipe_opt[] =
 +	{
-+		/* ----------Video pipes configure ----------------------*/
-+		{MAX96712_VIDEO_PIPE_SEL_0_ADDR, 0x10}, //0xF0, LINK A ID X to pipe 0 , Link A ID Y to pipe 1
-+		{MAX96712_VIDEO_PIPE_SEL_1_ADDR, 0x32}, //0xF1, LINK A ID Z to pipe 2 , Link A ID U to pipe 3
-+		{MAX96712_VIDEO_PIPE_SEL_2_ADDR, 0x54}, //0xF2, LINK B ID X to pipe 4 , Link B ID Y to pipe 5
-+		{MAX96712_VIDEO_PIPE_SEL_3_ADDR, 0x76}, //0xF3, LINK B ID Z to pipe 6 , Link B ID U to pipe 7
++		/* ----------Initial empty video pipe configure ----------------------*/
++		{MAX96712_VIDEO_PIPE_SEL_0_ADDR, 0x0},
++		{MAX96712_VIDEO_PIPE_SEL_1_ADDR, 0x0},
++		{MAX96712_VIDEO_PIPE_SEL_2_ADDR, 0x0},
++		{MAX96712_VIDEO_PIPE_SEL_3_ADDR, 0x0},
 +		{MAX96712_VIDEO_PIPE_EN_ADDR, 0x00}, //0xF4, Disable all pipes for now
 +	};
 +
@@ -439,6 +525,21 @@ index 8e237eef..33646ace 100644
 +	return err;
 +}
 +EXPORT_SYMBOL(max96712_init_settings);
++
++int max96712_bind_ser_to_dser_pipe(struct device *dev, int dser_pipe_id, int ser_pipe_id, u32 vc_id)
++{
++	struct max96712 *priv = dev_get_drvdata(dev);
++	int err = 0;
++
++	mutex_lock(&priv->lock);
++
++	err = __max96712_bind_ser_to_dser_pipe(dev, dser_pipe_id, ser_pipe_id, vc_id);
++
++	mutex_unlock(&priv->lock);
++
++	return err;
++}
++EXPORT_SYMBOL(max96712_bind_ser_to_dser_pipe);
 +
 +int max96712_set_pipe(struct device *dev, int pipe_id,
 +		     u8 data_type1, u8 data_type2, u32 vc_id)
@@ -486,7 +587,7 @@ index 8e237eef..33646ace 100644
 +
 +			/* Enable single link */
 +			max96712_write_reg(priv, MAX96712_REG6_ADDR, curr_map);
-+			msleep(10);
++			msleep(20);
 +			max96712_reset_oneshot(dev);
 +
 +			err = max96712_read_slave_reg(priv, dst_ser_addr, 0, &reg_val);
@@ -566,6 +667,10 @@ index 8e237eef..33646ace 100644
 +        gpio_direction_output(priv->pwdn_gpio, 1);
 +        gpio_set_value(priv->pwdn_gpio, 0);
 +        msleep(100);
++    } else {
++        /* If no power off GPIO exists, use reset all (self-clearing) */
++        max96712_write_reg(priv, MAX96712_PWR1_ADDR, MAX96712_PWR1_RESET_ALL_VAL);
++        msleep(200);
 +    }
 +    return;
 +}
@@ -582,7 +687,7 @@ index 8e237eef..33646ace 100644
  	{ },
  };
  
-@@ -300,6 +687,7 @@ static struct i2c_driver max96712_i2c_driver = {
+@@ -300,6 +788,7 @@ static struct i2c_driver max96712_i2c_driver = {
  	.driver = {
  		.name = "max96712",
  		.owner = THIS_MODULE,
@@ -592,3 +697,4 @@ index 8e237eef..33646ace 100644
  	.remove = max96712_remove,
 -- 
 2.43.0
+
