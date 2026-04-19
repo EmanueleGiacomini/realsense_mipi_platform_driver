@@ -2507,7 +2507,7 @@ static int ds5_hw_reset_with_recovery(struct ds5 *state)
 	 *    Releasing + re-allocating pipes now would race with FW init.
 	 *    Instead, clear pipe_data_type to force ds5_configure() to
 	 *    release-then-reallocate at stream-start time, when the FW
-	 *    has long finished its init (matching v1.0.1.33 behavior).
+	 *    has long finished its init (matching v1.0.1.28 behavior).
 	 */
 	atomic_inc(ds5_get_reset_gen(state));
 	WRITE_ONCE(state->ds5_dev->cached_device_type, DS5_DEVICE_TYPE_UNKNOWN);
@@ -6494,4 +6494,4 @@ MODULE_AUTHOR("Guennadi Liakhovetski <guennadi.liakhovetski@intel.com>,\n\
 				Shikun Ding <shikun.ding@intel.com>,\n\
 				Dmitry Perchanov <dmitry.perchanov@intel.com>");
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION("1.0.2.27");
+MODULE_VERSION("1.0.2.28");
