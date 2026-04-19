@@ -103,7 +103,7 @@ echo "New tag: $TAG_NAME"
 # Update the version fields in the file
 echo "Updating $VERSION_FILE..."
 if [ "$NEW_REV" -ne "$REV" ]; then
-    sed -i -E "s/([0-9]+\.[0-9]+\.[0-9]+\.)([0-9]+)/\1$NEW_REV/" "$VERSION_FILE"
+    sed -i -E "/MODULE_VERSION/ s/([0-9]+\.[0-9]+\.[0-9]+\.)([0-9]+)/\1$NEW_REV/" "$VERSION_FILE"
 else
     echo "Change not required"
 fi
