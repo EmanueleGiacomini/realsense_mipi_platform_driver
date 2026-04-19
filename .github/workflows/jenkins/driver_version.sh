@@ -134,32 +134,32 @@ echo "Successfully updated version to $BASE_VERSION.$NEW_REV"
 
 
 # Configure git (use environment variables if available)
-#if [ -n "$GIT_USER_NAME" ]; then
-#    git config user.name "$GIT_USER_NAME"
-#else
-#    git config user.name "Jenkins Auto Version"
-#fi
+if [ -n "$GIT_USER_NAME" ]; then
+    git config user.name "$GIT_USER_NAME"
+else
+    git config user.name "Jenkins Auto Version"
+fi
 
-#if [ -n "$GIT_USER_EMAIL" ]; then
-#    git config user.email "$GIT_USER_EMAIL"
-#else
-#    git config user.email "jenkins@realsenseai.com"
-#fi
+if [ -n "$GIT_USER_EMAIL" ]; then
+    git config user.email "$GIT_USER_EMAIL"
+else
+    git config user.email "jenkins@realsenseai.com"
+fi
 
 # Commit the change
 echo "Committing changes..."
-#git add "$VERSION_FILE"
-#git commit -m "Auto-increment version to $NEW_TAG_VERSION"
+git add "$VERSION_FILE"
+git commit -m "Auto-increment version to $NEW_TAG_VERSION"
 
 # Create and push the tag
 echo "Creating tag: $TAG_NAME"
-#git tag -a "$TAG_NAME" -m "Auto-tagged version $TAG_NAME"
+git tag -a "$TAG_NAME" -m "Auto-tagged version $TAG_NAME"
 
 
 # Push changes and tag
 echo "Pushing changes and tag to remote..."
-#git push origin "$BRANCH"
-#git push origin "$TAG_NAME"
+git push origin "$BRANCH"
+git push origin "$TAG_NAME"
 
 echo ""
 echo "=== Success ==="
