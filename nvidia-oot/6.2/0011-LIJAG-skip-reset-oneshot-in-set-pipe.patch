@@ -1,0 +1,61 @@
+From: Emanuele Giacomini <giacomini@diag.uniroma1.it>
+Date: Tue, 28 Apr 2026 16:00:00 +0200
+Subject: [PATCH] LIJAG: skip reset_oneshot inside __max96712_set_pipe
+
+__max96712_set_pipe() programs the per-pipe MIPI TX mappings then
+calls max96712_reset_oneshot() before flipping the per-pipe bit in
+VIDEO_PIPE_EN. reset_oneshot writes 0x0018 = 0x0F, which is the
+all-four-links GMSL one-shot reset. On the LI-JAG-ADP-GMSL2-8CH this
+mid-stream reset wedges the deserializer permanently:
+
+  1. ds5_mux_s_stream() calls ds5_configure() at stream-start.
+  2. ds5_configure() -> ds5_setup_pipeline() -> max96712_set_pipe().
+  3. set_pipe writes pipe_X..U MIPI TX regs, then 0x0018 = 0x0F
+     resets all four GMSL links + 100 ms settle.
+  4. After the settle the link relocks, the FIRST camera write
+     (DS5_START_STOP_STREAM = DS5_STREAM_START_DEPTH) succeeds and
+     the camera starts emitting MIPI packets.
+  5. Within the same poll cycle MAX96712 itself becomes unreachable
+     on its primary I2C interface (bus2:0x29). dmesg shows
+     "max96712_read_reg:i2c read failed, 0xf4 = 0" and every
+     d4xx i2c access returns -121 (EREMOTEIO) until full DC power
+     cycle. tegra-camrtc-capture-vi times out and the v4l2 stream
+     hangs.
+
+The MAX9296 counterpart (__max9296_set_pipe in nvidia-oot
+0001-Porting-...) does NOT call reset_oneshot at this stage;
+the MIPI TX mapping registers are CSRs that take effect immediately
+on write and do not require any reset to propagate. Mirror that
+behaviour for MAX96712 on LI-JAG.
+
+This fix together with 0010-LIJAG-simplify-max96712-setup-link
+removes both reset_oneshot invocations that fire during the d4xx
+probe + stream-start path. Other callers of max96712_reset_oneshot
+inside max96712.c and explicit invocations from d4xx.c
+(state->dser_ops->reset_oneshot) are preserved -- they are reached
+in different control flows (calibration switch, error recovery)
+and are out of scope for this patch.
+
+Signed-off-by: Emanuele Giacomini <giacomini@diag.uniroma1.it>
+---
+ drivers/media/i2c/max96712.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/i2c/max96712.c b/drivers/media/i2c/max96712.c
+--- a/drivers/media/i2c/max96712.c
++++ b/drivers/media/i2c/max96712.c
+@@ -533,7 +533,13 @@ static int __max96712_set_pipe(struct device *dev, int pipe_id, u8 data_type1,
+ 	if (err) {
+ 		return err;
+ 	}
+-	max96712_reset_oneshot(dev);
++	/*
++	 * LIJAG: do NOT reset GMSL links here. Writing CTRL1 = 0x0F
++	 * (all-link one-shot reset) mid-stream-start wedges the
++	 * deserializer on LI-JAG-ADP-GMSL2-8CH; the MAX9296 set_pipe
++	 * counterpart does not reset either, the MIPI TX mapping
++	 * registers latch on write without requiring a reset.
++	 */
+
+ 	err |= max96712_read_reg(priv, MAX96712_VIDEO_PIPE_EN_ADDR, &pipe_en_val);
+ 	if (err == 0) {
