@@ -223,6 +223,16 @@
 						 * camera-side MAX9295 beyond recovery.
 						 */
 						link-mask = <0xf>;
+						/*
+						 * DO NOT add force_clk0 on this board.
+						 * Tested 2026-04-28: setting force_clk0 makes
+						 * 0x08A0 = 0x24 (FORCE_CLK0_HS bit 5 set), which
+						 * wedges MAX96712 forward I2C the moment a stream
+						 * attempt fires; chip becomes unreachable on its
+						 * primary I2C until DC power cycle. Same failure
+						 * class as the documented "FORCE_CLK 0x81 harmful"
+						 * finding from the pre-PR#404 era.
+						 */
 					};
 
 					ser_a: max9295_a@40 {
