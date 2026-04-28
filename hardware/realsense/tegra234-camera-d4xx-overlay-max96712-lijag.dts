@@ -193,7 +193,15 @@
 				 * the deserializer vtable via strcmp(dser_node->name, ...).
 				 */
 				i2c@3180000 {
-					clock-frequency = <100000>;
+					/* 400 kHz matches the only known-working LI-JAG
+					 * configuration (recovered from the pre-PR#404
+					 * setup). 100 kHz boots and i2c-detects MAX96712
+					 * fine but the deserializer's GMSL forward I2C
+					 * clock divider (regs 0x0640/0x0641) appears to
+					 * be configured assuming a faster host bus, and
+					 * camera-side MAX9295 transactions fail.
+					 */
+					clock-frequency = <400000>;
 
 					dser: max96712@29 {
 						status = "okay";
@@ -201,6 +209,20 @@
 						compatible = "maxim,max96712";
 						csi-mode = "2x4";
 						channel = "a";
+						/* LI-JAG-ADP-GMSL2-8CH: final LINK_EN must be
+						 * 0xFF (= 0xF0 | 0xF) for the deserializer's
+						 * forward I2C channel to reach the camera-side
+						 * MAX9295. Verified live on this board.
+						 *
+						 * NOTE: requires the LI-JAG patch that strips
+						 * the per-link iteration + reset_oneshot from
+						 * max96712_setup_link — without that patch, the
+						 * iteration's intermediate LINK_EN values (0xF1,
+						 * 0xF2, 0xF4, 0xF8) and 4 successive
+						 * reset_oneshot writes destabilize the
+						 * camera-side MAX9295 beyond recovery.
+						 */
+						link-mask = <0xf>;
 					};
 
 					ser_a: max9295_a@40 {
