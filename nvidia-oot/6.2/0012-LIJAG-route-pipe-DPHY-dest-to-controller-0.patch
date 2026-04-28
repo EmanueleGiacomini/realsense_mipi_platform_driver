@@ -1,0 +1,55 @@
+From: Emanuele Giacomini <giacomini@diag.uniroma1.it>
+Date: Tue, 28 Apr 2026 19:00:00 +0200
+Subject: [PATCH] LIJAG: route pipe DPHY destination to controller 0 (PHY A)
+
+In __max96712_set_pipe, the per-pipe MAP_DPHY_DEST register (0x092D
++ 0x40*pipe_id) is written with 0x55 = 01_01_01_01 — all four
+sub-mappings routed to controller 1 (= PHY B in 4x2 mode).
+
+The accompanying upstream comment "All mappings to PHY1 (master for
+port A)" is from 2x4-mode terminology, where controllers 0+1 form a
+4-lane port A and "PHY1 = master". But init_settings (PR#404) writes
+0x08A0 = 0x04 which selects 4x2 mode — independent 2-lane PHYs.
+In 4x2 mode controller 1 = PHY B, not "master for port A". The
+PR#404 driver therefore programs an inconsistent topology: chip in
+4x2 but pipe routing in 2x4 semantics.
+
+The Leopard E3653 Xavier reference (the only proven-streaming
+MAX96712 + D457 driver in existence) writes 0x092D = 0x00 — all four
+mappings to controller 0 (= PHY A in 4x2 mode, = the master half of
+port A in 2x4 mode). 0x00 is the correct value regardless of whether
+the chip is in 2x4 or 4x2 mode, when the consumer is wired to
+MAX96712 PHY A's pins.
+
+The LI-JAG-ADP-GMSL2-8CH adapter routes MAX96712's PHY A output to
+the Jetson AGX Orin's CSI brick. With pipe data sent out PHY B
+(controller 1), the Orin sees nothing — exactly the symptom we have
+observed: tegra-camrtc-capture-vi: uncorr_err: request timed out
+after 2500 ms, zero rtcpu_vinotify_event entries, /sys/kernel/debug
+/nvcsi remains empty.
+
+Switch to 0x00 to match Leopard's proven sequence. If validation on
+LI-JAG confirms NVCSI now sees frames, we should consider extending
+this same change to the upstream EVB-targeted patch — there is no
+public evidence streaming was ever validated on the EVB either, so
+the same bug likely exists upstream.
+
+Signed-off-by: Emanuele Giacomini <giacomini@diag.uniroma1.it>
+---
+ drivers/media/i2c/max96712.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/i2c/max96712.c b/drivers/media/i2c/max96712.c
+--- a/drivers/media/i2c/max96712.c
++++ b/drivers/media/i2c/max96712.c
+@@ -557,8 +557,8 @@ static int __max96712_set_pipe(struct device *dev, int pipe_id, u8 data_type1,
+ 		{MAX96712_MIPI_TX_EXT2_ADDR + (0x10 * pipe_id), vc_id_msb << 2},
+ 		// Extended dst vc_id mapping 3
+ 		{MAX96712_MIPI_TX_EXT3_ADDR + (0x10 * pipe_id), vc_id_msb << 2},
+-		// All mappings to PHY1 (master for port A)
+-		{MAX96712_MIPI_TX45_MAP_DPHY_DEST_ADDR + (0x40 * pipe_id), 0x55},
++		// All mappings to controller 0 / PHY A — LIJAG, mirrors Leopard ref
++		{MAX96712_MIPI_TX45_MAP_DPHY_DEST_ADDR + (0x40 * pipe_id), 0x00},
+ 		// SEQ_MISS_EN: Disabled / DIS_PKT_DET: Disabled
+ 		// This reg has inconsistent gaps between reg addresses per pipe:
+ 		// 0x100, 0x112, 0x124, 0x136, 0x148, *0x160*, 0x172, 0x184

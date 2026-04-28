@@ -115,12 +115,27 @@ echo "=== [4/8] PRE-STREAM: rtcpu_trace ==="
 dump_rtcpu
 echo ""
 
-echo "=== [5/8] Clear dmesg ==="
+echo "=== [5/9] Clear dmesg + arm RTCPU tracing ==="
 dmesg -c > /dev/null
-echo "(cleared)"
+echo "(dmesg cleared)"
+# tegra_rtcpu trace events expose what the camera RTCPU (RCE) firmware sees
+# on the NVCSI brick: rtcpu_nvcsi_intr (PHY/STREAM error class), rtcpu_vinotify_event
+# (frame-start / frame-end), rtcpu_vinotify_error (overflow / crc / SOT errors),
+# camrtc_log_str (debug strings). Zero events with an active stream attempt =
+# NVCSI brick saw no PHY transitions = data isn't reaching the receiver at all.
+TRACE_DIR=/sys/kernel/debug/tracing
+if [[ -d "$TRACE_DIR/events/tegra_rtcpu" ]]; then
+    echo 0 > "$TRACE_DIR/tracing_on" 2>/dev/null
+    echo > "$TRACE_DIR/trace" 2>/dev/null
+    echo 1 > "$TRACE_DIR/events/tegra_rtcpu/enable" 2>/dev/null
+    echo 1 > "$TRACE_DIR/tracing_on" 2>/dev/null
+    echo "(tegra_rtcpu trace events armed)"
+else
+    echo "(WARN: $TRACE_DIR/events/tegra_rtcpu not found — kernel may lack CONFIG_TEGRA_CAMERA_RTCPU)"
+fi
 echo ""
 
-echo "=== [6/8] STREAM ATTEMPT (8s wall, 2 frames) on $VIDEO ==="
+echo "=== [6/9] STREAM ATTEMPT (8s wall, 2 frames) on $VIDEO ==="
 echo "Command: timeout 8 v4l2-ctl -d $VIDEO --stream-mmap=4 --stream-count=2 --stream-to=/tmp/lijag_stream.bin"
 echo ""
 timeout 8 v4l2-ctl -d $VIDEO --stream-mmap=4 --stream-count=2 \
@@ -131,16 +146,42 @@ ls -la /tmp/lijag_stream.bin 2>/dev/null \
     || echo "(no output file)"
 echo ""
 
-echo "=== [7/8] POST-STREAM: MAX96712 deserializer status ==="
+# Stop tracing immediately so the post-stream snapshot doesn't stir new events.
+if [[ -d "$TRACE_DIR/events/tegra_rtcpu" ]]; then
+    echo 0 > "$TRACE_DIR/tracing_on" 2>/dev/null
+fi
+
+echo "=== [7/9] POST-STREAM: MAX96712 deserializer status ==="
 dump_dser_status
 echo ""
 echo "=== POST-STREAM: MAX9295 serializer status ==="
 dump_ser_status
 echo ""
 
-echo "=== [8/8] POST-STREAM: rtcpu_trace + dmesg ==="
+echo "=== [8/9] POST-STREAM: rtcpu_trace summary ==="
 dump_rtcpu
 echo ""
+
+echo "=== [9/9] tegra_rtcpu tracefs events captured during stream ==="
+if [[ -d "$TRACE_DIR/events/tegra_rtcpu" ]]; then
+    # Filter to camera/CSI/VI events; skip empty boilerplate.
+    grep -E "rtcpu_nvcsi_intr|rtcpu_vinotify|camrtc_log|rtcpu_start|rtcpu_string" \
+        "$TRACE_DIR/trace" 2>/dev/null \
+        | head -200
+    EVCNT=$(grep -c -E "rtcpu_(nvcsi|vinotify|start|string)|camrtc_log" \
+            "$TRACE_DIR/trace" 2>/dev/null || echo 0)
+    echo ""
+    echo "(camera-related trace events captured: $EVCNT)"
+    echo "  zero rtcpu_vinotify_event = no SoF seen by VI demux"
+    echo "  rtcpu_nvcsi_intr with class=PHY_INTR  = clock/lane error"
+    echo "  rtcpu_nvcsi_intr with class=STREAM_*  = packet-level error"
+    # Disarm
+    echo 0 > "$TRACE_DIR/events/tegra_rtcpu/enable" 2>/dev/null
+else
+    echo "(tracing not available)"
+fi
+echo ""
+
 echo "--- dmesg captured during stream attempt ---"
 dmesg
 echo ""

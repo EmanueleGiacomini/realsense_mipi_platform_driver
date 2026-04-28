@@ -275,6 +275,22 @@
 							tegra_sinterface = "serial_b";
 							mclk_khz = "24000";
 							pix_clk_hz = "74250000";
+							/*
+							 * serdes_pix_clk_hz: tested 2026-04-28 with
+							 * value "187500000" (mathematically correct
+							 * for 1500 Mb/s/lane DPHY DDR given depth=16
+							 * and num_lanes=2 — should make NVCSI compute
+							 * CIL t_hs_settle for 750 MHz mipi_clock
+							 * matching MAX96712 BACKTOP25=0x2F). RESULT:
+							 * chip wedged immediately on first stream
+							 * attempt; reverted. Reason unclear —
+							 * possibly RCE-side reconfigure interacts
+							 * with MAX96712's MIPI-TX startup race.
+							 * Leave commented so future readers can see
+							 * the exact value and revisit it if the
+							 * chip-wedging-on-stream-start root cause is
+							 * eventually fixed elsewhere.
+							 */
 							line_length = "1280";
 							embedded_metadata_height = "0";
 						};
@@ -323,6 +339,22 @@
 							tegra_sinterface = "serial_b";
 							mclk_khz = "24000";
 							pix_clk_hz = "74250000";
+							/*
+							 * serdes_pix_clk_hz: tested 2026-04-28 with
+							 * value "187500000" (mathematically correct
+							 * for 1500 Mb/s/lane DPHY DDR given depth=16
+							 * and num_lanes=2 — should make NVCSI compute
+							 * CIL t_hs_settle for 750 MHz mipi_clock
+							 * matching MAX96712 BACKTOP25=0x2F). RESULT:
+							 * chip wedged immediately on first stream
+							 * attempt; reverted. Reason unclear —
+							 * possibly RCE-side reconfigure interacts
+							 * with MAX96712's MIPI-TX startup race.
+							 * Leave commented so future readers can see
+							 * the exact value and revisit it if the
+							 * chip-wedging-on-stream-start root cause is
+							 * eventually fixed elsewhere.
+							 */
 							line_length = "1280";
 							embedded_metadata_height = "1";
 						};
@@ -370,6 +402,22 @@
 							tegra_sinterface = "serial_e";
 							mclk_khz = "24000";
 							pix_clk_hz = "74250000";
+							/*
+							 * serdes_pix_clk_hz: tested 2026-04-28 with
+							 * value "187500000" (mathematically correct
+							 * for 1500 Mb/s/lane DPHY DDR given depth=16
+							 * and num_lanes=2 — should make NVCSI compute
+							 * CIL t_hs_settle for 750 MHz mipi_clock
+							 * matching MAX96712 BACKTOP25=0x2F). RESULT:
+							 * chip wedged immediately on first stream
+							 * attempt; reverted. Reason unclear —
+							 * possibly RCE-side reconfigure interacts
+							 * with MAX96712's MIPI-TX startup race.
+							 * Leave commented so future readers can see
+							 * the exact value and revisit it if the
+							 * chip-wedging-on-stream-start root cause is
+							 * eventually fixed elsewhere.
+							 */
 							line_length = "1280";
 							embedded_metadata_height = "1";
 						};
@@ -416,6 +464,22 @@
 							tegra_sinterface = "serial_a";
 							mclk_khz = "24000";
 							pix_clk_hz = "74250000";
+							/*
+							 * serdes_pix_clk_hz: tested 2026-04-28 with
+							 * value "187500000" (mathematically correct
+							 * for 1500 Mb/s/lane DPHY DDR given depth=16
+							 * and num_lanes=2 — should make NVCSI compute
+							 * CIL t_hs_settle for 750 MHz mipi_clock
+							 * matching MAX96712 BACKTOP25=0x2F). RESULT:
+							 * chip wedged immediately on first stream
+							 * attempt; reverted. Reason unclear —
+							 * possibly RCE-side reconfigure interacts
+							 * with MAX96712's MIPI-TX startup race.
+							 * Leave commented so future readers can see
+							 * the exact value and revisit it if the
+							 * chip-wedging-on-stream-start root cause is
+							 * eventually fixed elsewhere.
+							 */
 							line_length = "1280";
 							embedded_metadata_height = "1";
 						};
