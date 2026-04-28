@@ -2206,6 +2206,16 @@ static int ds5_hw_set_exposure(struct ds5 *state, u32 base, s32 val)
 #define DS5_CAMERA_CID_HWMC			(DS5_CAMERA_CID_BASE+15)
 #define DS5_CAMERA_CID_SYNC_MODE		(DS5_CAMERA_CID_BASE+16)
 
+/* Sync mode values — indices into sync_mode_menu_full[] */
+enum ds5_sync_mode {
+	DS5_SYNC_MODE_DEFAULT,
+	DS5_SYNC_MODE_MASTER,
+	DS5_SYNC_MODE_SLAVE,
+	DS5_SYNC_MODE_FULL_SLAVE,
+	DS5_SYNC_MODE_SUB_PREMASTER,
+	DS5_SYNC_MODE_FULL_MASTER,
+};
+
 #define DS5_CAMERA_CID_PWM			(DS5_CAMERA_CID_BASE+22)
 
 /* the HWMC will remain for legacy tools compatibility,
@@ -2416,6 +2426,40 @@ static void ds5_reset_streaming_flags(struct ds5_dev *ds5_dev)
 	mutex_unlock(&ds5_dev->lock);
 }
 
+static int ds5_set_ser_esync_tunneling(struct ds5 *state, bool enable)
+{
+#ifdef CONFIG_VIDEO_D4XX_SERDES
+	int ret;
+
+	if (!state || !state->ser_dev)
+		return -EINVAL;
+	if (state->dser_ops != &max96712_interface)
+		return 0;
+
+	dev_dbg(&state->client->dev,
+		"%s(): serializer ESYNC %s requested\n",
+		__func__, enable ? "enable" : "disable");
+
+	if (enable)
+		ret = max9295_enable_gpio_tunneling(state->ser_dev);
+	else
+		ret = max9295_disable_gpio_tunneling(state->ser_dev);
+
+	if (ret)
+		dev_warn(&state->client->dev,
+			"%s(): serializer ESYNC %s failed (%d)\n",
+			__func__, enable ? "enable" : "disable", ret);
+	else
+		dev_dbg(&state->client->dev,
+			"%s(): serializer ESYNC %s OK\n",
+			__func__, enable ? "enable" : "disable");
+
+	return ret;
+#else
+	return 0;
+#endif
+}
+
 /*
  * ds5_hw_reset_with_recovery - Perform hardware reset with readiness polling
  * @state: Driver state structure
@@ -2622,6 +2666,19 @@ static int ds5_hw_reset_with_recovery(struct ds5 *state)
 		dev_type,
 		(state->fw_version >> 8) & 0xff, state->fw_version & 0xff,
 		(state->fw_build >> 8) & 0xff, state->fw_build & 0xff);
+
+	/* Re-apply ESYNC tunneling to match cached sync_mode control */
+	if (state->ctrls.sync_mode) {
+		int sync_val = state->ctrls.sync_mode->cur.val;
+		bool need_esync = (sync_val == DS5_SYNC_MODE_SLAVE ||
+				   sync_val == DS5_SYNC_MODE_FULL_SLAVE);
+
+		ret = ds5_set_ser_esync_tunneling(state, need_esync);
+		if (ret)
+			dev_warn(&state->client->dev,
+				"%s(): serializer ESYNC %s after HW reset failed (%d)\n",
+				__func__, need_esync ? "enable" : "disable", ret);
+	}
 
 	WRITE_ONCE(state->ds5_dev->last_reset_jiffies, jiffies);
 
@@ -2928,6 +2985,16 @@ static int ds5_s_ctrl(struct v4l2_ctrl *ctrl)
 			ret = ds5_write(state, base | DS5_CAMERA_SYNC_MODE, ctrl->val);
 			dev_info(&state->client->dev, "%s(): SYNC_MODE command passed to FW, addr: 0x%x, value: %d, ret: %d\n",
 				__func__, base | DS5_CAMERA_SYNC_MODE, ctrl->val, ret);
+			if (!ret) {
+				bool need_esync = (ctrl->val == DS5_SYNC_MODE_SLAVE ||
+						   ctrl->val == DS5_SYNC_MODE_FULL_SLAVE);
+
+				dev_dbg(&state->client->dev,
+					"%s(): sync_mode=%d -> serializer ESYNC %s\n",
+					__func__, ctrl->val,
+					need_esync ? "enable" : "disable");
+				ret = ds5_set_ser_esync_tunneling(state, need_esync);
+			}
 		}
 		break;
 	case DS5_CAMERA_CID_PWM:
@@ -3433,12 +3500,12 @@ static const struct v4l2_ctrl_config ds5_ctrl_hw_reset = {
 
 /* Sync mode menu arrays for different camera platforms */
 static const char * const sync_mode_menu_full[] = {
-	"Default",           /* 0 */
-	"Master",            /* 1 */
-	"Slave",             /* 2 */
-	"Full Slave",        /* 3 */
-	"Sub Pre-Master",    /* 4 */
-	"Full Master",       /* 5 */
+	[DS5_SYNC_MODE_DEFAULT]       = "Default",
+	[DS5_SYNC_MODE_MASTER]        = "Master",
+	[DS5_SYNC_MODE_SLAVE]         = "Slave",
+	[DS5_SYNC_MODE_FULL_SLAVE]    = "Full Slave",
+	[DS5_SYNC_MODE_SUB_PREMASTER] = "Sub Pre-Master",
+	[DS5_SYNC_MODE_FULL_MASTER]   = "Full Master",
 };
 
 static const char * const sync_mode_menu_d401[] = {
@@ -3950,13 +4017,6 @@ static int ds5_gmsl_serdes_setup(struct ds5 *state)
 	/* proceed even if ser setup failed, to setup deser correctly */
 	if (err)
 		dev_err(dev, "gmsl serializer setup failed\n");
-
-	/* Extended GPIO tunneling for MAX96712A deserializer */
-	if (state->dser_ops == &max96712_interface) {
-		int tun_err = max9295_setup_gpio_tunneling(state->ser_dev);
-		if (tun_err)
-			dev_err(dev, "gmsl serializer GPIO tunneling setup failed\n");
-	}
 
 	des_err = state->dser_ops->setup_control(state->dser_dev, &state->client->dev);
 	if (des_err) {
