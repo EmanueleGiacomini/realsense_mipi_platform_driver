@@ -134,6 +134,10 @@ struct dser_interface {
 #define DS5_RGB_FPS				0x402C
 #define DS5_RGB_CONTROL_STATUS 	0x402E
 
+/* SerDes startup I2C readiness polling (defer probe if not responsive) */
+#define DS5_SERDES_STARTUP_TIMEOUT_MS 2000
+#define DS5_SERDES_STARTUP_RETRY_DELAY_MS 100
+
 #define DS5_IMU_STREAM_DT		0x4040
 #define DS5_IMU_STREAM_MD		0x4042
 #define DS5_IMU_RES_WIDTH		0x4044
@@ -540,6 +544,7 @@ struct ds5_dev {
 
 	/* Pointer to the primary DS5 struct */
 	struct ds5 *ds5_primary;
+	bool serdes_setup_complete;
 
 	bool depth_streaming;
 	bool ir_streaming;
@@ -3577,9 +3582,64 @@ static void ds5_init_ds5_dev(struct ds5 *state, struct ds5_dev *ds5_dev)
 	state->ds5_dev = ds5_dev;
 	mutex_lock(&ds5_dev->lock);
 	ds5_dev->ds5_primary = state;
+	ds5_dev->serdes_setup_complete = false;
 	ds5_dev->cached_device_type = DS5_DEVICE_TYPE_UNKNOWN;
 	mutex_unlock(&ds5_dev->lock);
 	ds5_reset_streaming_flags(ds5_dev);
+}
+
+/* Caller must hold serdes_lock__. */
+static bool ds5_release_slot(struct ds5 *state)
+{
+	struct dser_control *dser_control;
+	bool has_other_users = false;
+	bool released = false;
+	int i;
+
+	if (!state->ds5_dev)
+		return false;
+
+	mutex_lock(&serdes_lock__);
+
+	mutex_lock(&state->ds5_dev->lock);
+	if (state->ds5_dev->ds5_primary == state) {
+		dser_control = state->ds5_dev->dser_control;
+		state->ds5_dev->ds5_primary = NULL;
+		state->ds5_dev->serdes_setup_complete = false;
+		state->ds5_dev->dser_control = NULL;
+		released = true;
+	} else {
+		dser_control = NULL;
+	}
+	mutex_unlock(&state->ds5_dev->lock);
+
+	if (!released || !dser_control) {
+		mutex_unlock(&serdes_lock__);
+		return released;
+	}
+
+	for (i = 0; i < MAX_DS5_NUM; i++) {
+		bool in_use;
+
+		mutex_lock(&ds5_inited[i].lock);
+		in_use = ds5_inited[i].ds5_primary &&
+			ds5_inited[i].dser_control == dser_control;
+		mutex_unlock(&ds5_inited[i].lock);
+		if (in_use) {
+			has_other_users = true;
+			break;
+		}
+	}
+
+	if (!has_other_users) {
+		mutex_lock(&dser_control->lock);
+		if (dser_control->dser_dev == state->dser_dev)
+			dser_control->dser_dev = NULL;
+		mutex_unlock(&dser_control->lock);
+	}
+
+	mutex_unlock(&serdes_lock__);
+	return released;
 }
 
 #ifdef CONFIG_VIDEO_D4XX_SERDES
@@ -3595,12 +3655,18 @@ static int ds5_setup_and_link(struct ds5 *state)
 	/* Look for existing DS5 instances */
 	for (i = 0; i < MAX_DS5_NUM; i++) {
 		bool match;
+		bool ready;
 
 		mutex_lock(&ds5_inited[i].lock);
 		match = ds5_inited[i].ds5_primary &&
 			ds5_inited[i].ds5_primary->ser_dev == state->ser_dev;
+		ready = ds5_inited[i].serdes_setup_complete;
 		mutex_unlock(&ds5_inited[i].lock);
 		if (match) { /* Same camera, different stream instance. */
+			if (!ready) {
+				err = -EPROBE_DEFER;
+				goto out_unlock;
+			}
 			state->serdes_primary = false;
 			state->ds5_dev = &ds5_inited[i];
 			break;
@@ -3986,6 +4052,8 @@ static int ds5_gmsl_serdes_setup(struct ds5 *state)
 {
 	int err = 0;
 	int des_err = 0;
+	int attempts;
+	int retry;
 	struct device *dev;
 
 	if (!state || !state->ser_dev || !state->dser_dev || !state->client)
@@ -4012,12 +4080,25 @@ static int ds5_gmsl_serdes_setup(struct ds5 *state)
 		goto error;
 	}
 	msleep(100);
-	err = max9295_setup_control(state->ser_dev);
+	attempts = (DS5_SERDES_STARTUP_TIMEOUT_MS +
+		DS5_SERDES_STARTUP_RETRY_DELAY_MS - 1) /
+		DS5_SERDES_STARTUP_RETRY_DELAY_MS;
+	for (retry = 0; retry < attempts; retry++) {
+		err = max9295_setup_control(state->ser_dev);
+		if (!err)
+			break;
+		if (retry < attempts - 1)
+			msleep(DS5_SERDES_STARTUP_RETRY_DELAY_MS);
+	}
+	if (err) {
+		dev_err(dev,
+			"%s(): serializer setup failed (err=%d) after %d ms, deferring probe\n",
+			__func__, err, DS5_SERDES_STARTUP_TIMEOUT_MS);
+		err = -EPROBE_DEFER;
+		goto error;
+	}
 
 	/* proceed even if ser setup failed, to setup deser correctly */
-	if (err)
-		dev_err(dev, "gmsl serializer setup failed\n");
-
 	des_err = state->dser_ops->setup_control(state->dser_dev, &state->client->dev);
 	if (des_err) {
 		dev_err(dev, "gmsl deserializer setup failed\n");
@@ -4086,9 +4167,20 @@ static int ds5_serdes_setup(struct ds5 *state)
 	}
 
 serdes_setup_end:
+	/* Set/clear serdes_setup_complete from the same exit gate: error branch
+	 * clears it, success branch sets it. This ensures flag state is
+	 * synchronized with actual setup completion status.
+	 */
 	if (ret) {
 		max9295_sdev_unpair(state->ser_dev, state->g_ctx.s_dev);
 		state->dser_ops->sdev_unregister(state->dser_dev, state->g_ctx.s_dev);
+		if (state->serdes_primary)
+			ds5_release_slot(state);
+	} else if (state->serdes_primary) {
+		mutex_lock(&state->ds5_dev->lock);
+		if (state->ds5_dev->ds5_primary == state)
+			state->ds5_dev->serdes_setup_complete = true;
+		mutex_unlock(&state->ds5_dev->lock);
 	}
 
 	return ret;
@@ -6420,15 +6512,7 @@ static void ds5_remove(struct i2c_client *c)
 		int ret;
 		bool do_cleanup = false;
 
-		mutex_lock(&serdes_lock__);
-		mutex_lock(&state->ds5_dev->lock);
-
-		if (state->ds5_dev->ds5_primary) {
-			state->ds5_dev->ds5_primary = NULL;
-			do_cleanup = true;
-		}
-
-		mutex_unlock(&state->ds5_dev->lock);
+		do_cleanup = ds5_release_slot(state);
 
 		if (do_cleanup) {
 			ret = max9295_reset_control(state->ser_dev);
@@ -6451,9 +6535,6 @@ static void ds5_remove(struct i2c_client *c)
 					"failed to %s unregister sdev\n", state->dser_ops->name);
 			state->dser_ops->power_off(state->dser_dev);
 		}
-
-		mutex_unlock(&serdes_lock__);
-
 	}
 #ifndef CONFIG_OF
 	if (state->ser_i2c)
