@@ -492,7 +492,6 @@ struct ds5 {
 	bool metadata_enabled;
 	int aggregated;
 	int reset_ref_ds5;
-	int reset_ref_dser;
 	u16 fw_version;
 	u16 fw_build;
 	u16 control_base;
@@ -504,7 +503,8 @@ struct ds5 {
 	struct i2c_client *ser_i2c;
 	struct i2c_client *dser_i2c;
 	const struct dser_interface *dser_ops;
-	bool serdes_primary; /* true for the instance that ran SERDES setup */
+	bool ser_primary; /* true for the first instance per serializer (first stream of a specific camera) */
+	bool dser_primary; /* true for the first instance per deserializer (first camera of a specific dser) */
 #endif
 	struct ds5_dev *ds5_dev; /* pointer to DS5 device struct */
 };
@@ -559,15 +559,6 @@ static bool ds5_slots_inited;
 #define MAX_DSER_NUM 4
 struct dser_control {
 	struct mutex lock;
-
-	/*
-	* Per-deserializer reset generation counter.
-	* Replaces the old global ds5_reset_gen for SERDES builds so that
-	* resetting camera A does not force camera B (on a different deserializer)
-	* to invalidate its state.  Cameras sharing the same deserializer still
-	* see each other's resets through the shared counter.
-	*/
-	atomic_t reset_gen;
 	struct device *dser_dev;
 };
 static struct dser_control dser_inited[MAX_DSER_NUM];
@@ -595,11 +586,6 @@ static void ds5_init_global_slots_once(void)
 static inline atomic_t *ds5_get_reset_gen(struct ds5 *state)
 {
 	return &state->ds5_dev->reset_gen;
-}
-
-static inline atomic_t *dser_get_reset_gen(struct ds5 *state)
-{
-	return &state->ds5_dev->dser_control->reset_gen;
 }
 
 /* MAX9296 deserializer interface implementation */
@@ -3652,6 +3638,8 @@ static int ds5_setup_and_link(struct ds5 *state)
 	mutex_lock(&serdes_lock__);
 	ds5_init_global_slots_once();
 	state->ds5_dev = NULL;
+	state->ser_primary = false;
+	state->dser_primary = false;
 	/* Look for existing DS5 instances */
 	for (i = 0; i < MAX_DS5_NUM; i++) {
 		bool match;
@@ -3667,7 +3655,7 @@ static int ds5_setup_and_link(struct ds5 *state)
 				err = -EPROBE_DEFER;
 				goto out_unlock;
 			}
-			state->serdes_primary = false;
+			state->ser_primary = false;
 			state->ds5_dev = &ds5_inited[i];
 			break;
 		}
@@ -3683,7 +3671,7 @@ static int ds5_setup_and_link(struct ds5 *state)
 			if (free_slot) {
 				int j;
 				ds5_init_ds5_dev(state, &ds5_inited[i]);
-				state->serdes_primary = true;
+				state->ser_primary = true;
 				/* Look for matching deserializer */
 				state->ds5_dev->dser_control = NULL;
 				for (j = 0; j < MAX_DSER_NUM; j++) {
@@ -3701,6 +3689,7 @@ static int ds5_setup_and_link(struct ds5 *state)
 						if (NULL == dser_inited[j].dser_dev) {
 							dser_inited[j].dser_dev = state->dser_dev;
 							state->ds5_dev->dser_control = &dser_inited[j];
+							state->dser_primary = true;
 						}
 						mutex_unlock(&dser_inited[j].lock);
 						if (state->ds5_dev->dser_control)
@@ -4063,23 +4052,26 @@ static int ds5_gmsl_serdes_setup(struct ds5 *state)
 
 	mutex_lock(&serdes_lock__);
 
-	state->dser_ops->power_off(state->dser_dev);
-	/* For now no separate power on required for serializer device */
-	state->dser_ops->power_on(state->dser_dev);
-	/* Allow deserializer to stabilize after power cycle before I2C access.
-	 * With REGCACHE_NONE the first register write goes straight to I2C;
-	 * if the chip is still booting after XCLR deassert the write fails.
-	 */
-	msleep(600);
+	if (state->dser_primary) {
+		state->dser_ops->power_off(state->dser_dev);
+		/* For now no separate power on required for serializer device */
+		state->dser_ops->power_on(state->dser_dev);
+		/* Allow deserializer to stabilize after power cycle before I2C access.
+		 * With REGCACHE_NONE the first register write goes straight to I2C;
+		 * if the chip is still booting after XCLR deassert the write fails.
+		 */
+		msleep(600);
 
-	dev_dbg(dev, "Setup SERDES addressing and control pipeline\n");
-	/* setup serdes addressing and control pipeline */
-	err = state->dser_ops->setup_link(state->dser_dev, &state->client->dev);
-	if (err) {
-		dev_err(dev, "gmsl deserializer link config failed\n");
-		goto error;
+		dev_dbg(dev, "Setup SERDES addressing and control pipeline\n");
+		/* setup serdes addressing and control pipeline */
+		err = state->dser_ops->setup_link(state->dser_dev, &state->client->dev);
+		if (err) {
+			dev_err(dev, "gmsl deserializer link config failed\n");
+			goto error;
+		}
+		msleep(100);
 	}
-	msleep(100);
+
 	attempts = (DS5_SERDES_STARTUP_TIMEOUT_MS +
 		DS5_SERDES_STARTUP_RETRY_DELAY_MS - 1) /
 		DS5_SERDES_STARTUP_RETRY_DELAY_MS;
@@ -4098,12 +4090,14 @@ static int ds5_gmsl_serdes_setup(struct ds5 *state)
 		goto error;
 	}
 
-	/* proceed even if ser setup failed, to setup deser correctly */
-	des_err = state->dser_ops->setup_control(state->dser_dev, &state->client->dev);
-	if (des_err) {
-		dev_err(dev, "gmsl deserializer setup failed\n");
-		/* overwrite err only if deser setup also failed */
-		err = des_err;
+	if (state->dser_primary) {
+		/* proceed even if ser setup failed, to setup deser correctly */
+		des_err = state->dser_ops->setup_control(state->dser_dev, &state->client->dev);
+		if (des_err) {
+			dev_err(dev, "gmsl deserializer setup failed\n");
+			/* overwrite err only if deser setup also failed */
+			err = des_err;
+		}
 	}
 
 error:
@@ -4127,7 +4121,7 @@ static int ds5_serdes_setup(struct ds5 *state)
 	 * this serializer and marked us non-primary.  Skip SERDES setup
 	 * (pair, register, gmsl init) — the primary already did it.
 	 */
-	if (!state->serdes_primary) {
+	if (!state->ser_primary) {
 		dev_info(&c->dev, "peer instance, skipping SERDES setup\n");
 		return 0;
 	}
@@ -4159,11 +4153,13 @@ static int ds5_serdes_setup(struct ds5 *state)
 		goto serdes_setup_end;
 	}
 
-	ret = state->dser_ops->init_settings(state->dser_dev);
-	if (ret) {
-		dev_warn(&c->dev, "%s, failed to init %s settings\n",
-			__func__, state->dser_ops->name);
-		goto serdes_setup_end;
+	if (state->dser_primary) {
+		ret = state->dser_ops->init_settings(state->dser_dev);
+		if (ret) {
+			dev_warn(&c->dev, "%s, failed to init %s settings\n",
+				__func__, state->dser_ops->name);
+			goto serdes_setup_end;
+		}
 	}
 
 serdes_setup_end:
@@ -4174,9 +4170,9 @@ serdes_setup_end:
 	if (ret) {
 		max9295_sdev_unpair(state->ser_dev, state->g_ctx.s_dev);
 		state->dser_ops->sdev_unregister(state->dser_dev, state->g_ctx.s_dev);
-		if (state->serdes_primary)
+		if (state->ser_primary)
 			ds5_release_slot(state);
-	} else if (state->serdes_primary) {
+	} else if (state->ser_primary) {
 		mutex_lock(&state->ds5_dev->lock);
 		if (state->ds5_dev->ds5_primary == state)
 			state->ds5_dev->serdes_setup_complete = true;
@@ -4889,11 +4885,6 @@ static int ds5_mux_s_stream(struct v4l2_subdev *sd, int on)
 	bool ds5_config_done = !on; /* for stop, skip config */
 	bool reset_invalidated = false;
 	bool *streaming_flag = NULL;
-#ifdef CONFIG_VIDEO_D4XX_SERDES
-	int cur_dser = atomic_read(dser_get_reset_gen(state));
-#else
-	int cur_dser = 0;
-#endif
 	int cur_ds5 = atomic_read(ds5_get_reset_gen(state));
 
 	/* Lazy invalidation after HW or deserializer reset.
@@ -4901,13 +4892,11 @@ static int ds5_mux_s_stream(struct v4l2_subdev *sd, int on)
 	 * state, then update refs.  Must run before the duplicate-call
 	 * guard so a reset-killed stream is not mistaken for "already off".
 	 */
-	if (state->reset_ref_ds5 != cur_ds5
-			|| state->reset_ref_dser != cur_dser) {
+	if (state->reset_ref_ds5 != cur_ds5) {
 		ds5_invalidate_sensor(state, sensor);
 		sensor->streaming = false;
 		reset_invalidated = true;
 		state->reset_ref_ds5 = cur_ds5;
-		state->reset_ref_dser = cur_dser;
 	}
 
 	// spare duplicate calls
@@ -6348,7 +6337,6 @@ static int ds5_probe(struct i2c_client *c
 	ret = ds5_serdes_setup(state);
 	if (ret < 0)
 		goto e_regulator;
-	state->reset_ref_dser = atomic_read(dser_get_reset_gen(state));
 #else
 	ds5_init_global_slots_once();
 	mutex_lock(&ds5_inited[0].lock);
@@ -6508,7 +6496,7 @@ static void ds5_remove(struct i2c_client *c)
 	}
 
 #ifdef CONFIG_VIDEO_D4XX_SERDES
-	if (state->serdes_primary) {
+	if (state->ser_primary) {
 		int ret;
 		bool do_cleanup = false;
 
