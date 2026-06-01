@@ -1,12 +1,21 @@
-# Intel® RealSense™ camera driver for GMSL* interface
+<p align="center">
+<!-- Light mode -->
+<img src="https://github.com/realsenseai/librealsense/raw/master/doc/img/realsense-logo-light-mode.png#gh-light-mode-only" alt="Logo for light mode" width="30%"/>
+
+<!-- Dark mode -->
+<img src="https://github.com/realsenseai/librealsense/raw/master/doc/img/realsense-logo-dark-mode.png#gh-dark-mode-only" alt="Logo for dark mode" width="30%"/>
+<br><br>
+</p>
+
+# RealSense™ camera driver for GMSL* interface
 
 # D457 MIPI on NVIDIA® Jetson AGX Xavier™ and AGX Orin™
 The RealSense™ MIPI platform driver enables the user to control and stream RealSense™ 3D MIPI cameras.
 The system shall include:
-* NVIDIA® Jetson platform (Currently Supported JetPack versions are: 6.2, 6.1, 6.0, 5.1.2, 5.0.2, 4.6.1)
-* RealSense De-Serialize board (https://store.intelrealsense.com/buy-intel-realsense-des457.html)
+* NVIDIA® Jetson platform (Currently Supported JetPack versions are: 7.1, 7.0, 6.2.1, 6.2, 6.1, 6.0, 5.1.2, 5.0.2, 4.6.1)
+* RealSense™ De-Serialize board
 * NVIDIA® Jetson AGX Orin™ Passive adapter board from [Leopard Imaging LI-JTX1-SUB-ADPT](https://leopardimaging.com/product/accessories/adapters-carrier-boards/for-nvidia-jetson/li-jtx1-sub-adpt/)
-* RS MIPI camera (e.g. https://store.intelrealsense.com/buy-intel-realsense-depth-camera-d457.html)
+* RS MIPI camera (e.g. https://store.realsenseai.com/buy-intel-realsense-depth-camera-d457.html)
 
 > Note: This MIPI reference driver is based on RealSense de-serialize board. For other de-serialize boards, modification might be needed. 
 
@@ -15,6 +24,7 @@ The system shall include:
 
 # Documentation
 
+- NVIDIA® Jetson AGX Orin™ board setup - AGX Orin™ [JetPack 7.x](./README_JP7.md) setup guide
 - NVIDIA® Jetson AGX Orin™ board setup - AGX Orin™ [JetPack 6.0](./README_JP6.0.md) setup guide
 - NVIDIA® Jetson AGX Xavier™ board setup - AGX Xavier™ [JetPack 5.x.2](./README_JP5.md) setup guide
 - NVIDIA® Jetson AGX Xavier™ board setup - AGX Xavier™ [JetPack 4.6.1](./README_JP4.md) setup guide
@@ -29,8 +39,9 @@ Please follow the [instruction](https://docs.nvidia.com/sdk-manager/install-with
 
 # JetPack build
 
-- [JetPack 6.0](./README_JP6.0.md#build-environment-prerequisites)
+- [JetPack 7.x](./README_JP7.md#build-environment-prerequisites)
 - [JetPack 6.2](./README_JP6.2.md#build-environment-prerequisites)
+- [JetPack 6.0](./README_JP6.0.md#build-environment-prerequisites)
 - [JetPack 5.x.2](./README_JP5.md#build-kernel-dtb-and-d457-driver)
 - [JetPack 4.6.1](./README_JP4.md#build-kernel-dtb-and-d457-driver)
 

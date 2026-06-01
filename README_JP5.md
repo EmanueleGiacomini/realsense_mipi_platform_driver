@@ -1,17 +1,17 @@
-# Intel® RealSense™ camera driver for GMSL* interface on NVIDIA® Jetson AGX Xavier™ JetPack 5.x.2
+# RealSense™ camera driver for GMSL* interface on NVIDIA® Jetson AGX Xavier™ JetPack 5.x.2
 
 # D457 MIPI on NVIDIA® Jetson AGX Xavier™
-The Intel® RealSense™ MIPI platform driver enables the user to control and stream RealSense™ 3D MIPI cameras.
+The RealSense™ MIPI platform driver enables the user to control and stream RealSense™ 3D MIPI cameras.
 
 The system shall include:
 * NVIDIA® Jetson™ platform (Currently Supported JetPack versions are: 5.1.2, 5.0.2)
-* RealSense™ De-Serialize board (https://store.intelrealsense.com/buy-intel-realsense-des457.html)
-* RS MIPI camera (e.g. https://store.intelrealsense.com/buy-intel-realsense-depth-camera-d457.html)
+* RealSense™ De-Serialize board
+* RS MIPI camera (e.g. https://store.realsenseai.com/buy-intel-realsense-depth-camera-d457.html)
 
 > Note: This MIPI reference driver is based on RealSense™ de-serialize board. For other de-serialize boards, modification might be needed.
 
 ### Links
-- Intel® RealSense™ camera driver for GMSL* interface [Front Page](./README.md)
+- RealSense™ camera driver for GMSL* interface [Front Page](./README.md)
 - Jetson AGX Orin™ board setup - AGX Orin™ [JetPack 6.x](./README_JP6.md) setup guide
 - Jetson AGX Xavier™ board setup - AGX Xavier™ [JetPack 5.x.2](./README_JP5.md) setup guide
 - Jetson AGX Xavier™ board setup - AGX Xavier™ [JetPack 4.6.1](./README_JP4.md) setup guide
@@ -95,6 +95,19 @@ The developers can set up the source code with NVIDIA's Jetson git repositories 
 
 ./build_all.sh 5.1.2
 ```
+For Fangzhu FG12-16CH support (Currently only supported on 5.0.2):
+```
+./setup_workspace.sh 5.0.2
+
+- Single camera connected to cam0:
+./apply_patches.sh --fg12-16ch 5.0.2
+
+- Dual camera connected to cam0 and cam4:
+./apply_patches.sh --fg12-16ch-dual 5.0.2
+
+./build_all.sh 5.1.2
+```
+
 Note: dev_dbg() log support will not be enabled by default. If needed, run the `./build_all.sh` script with `--dev-dbg` option like below.
 ```
 ./build_all.sh --dev-dbg 5.1.2

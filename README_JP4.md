@@ -1,17 +1,17 @@
-# Intel® RealSense™ camera driver for GMSL* interface on NVIDIA® Jetson AGX Xavier™ JetPack 4.6.1
+# RealSense™ camera driver for GMSL* interface on NVIDIA® Jetson AGX Xavier™ JetPack 4.6.1
 
 # D457 MIPI on NVIDIA® Jetson AGX Xavier™
-The Intel® RealSense™ MIPI platform driver enables the user to control and stream RealSense 3D MIPI cameras.
+The RealSense™ MIPI platform driver enables the user to control and stream RealSense 3D MIPI cameras.
 
 The system shall include:
 * NVIDIA® Jetson™ platform (Currently Supported JetPack versions are: 4.6.1)
-* RealSense™ De-Serialize board (https://store.intelrealsense.com/buy-intel-realsense-des457.html)
-* RS MIPI camera (e.g. https://store.intelrealsense.com/buy-intel-realsense-depth-camera-d457.html)
+* RealSense™ De-Serialize board
+* RS MIPI camera (e.g. https://store.realsenseai.com/buy-intel-realsense-depth-camera-d457.html)
 
 > Note: This MIPI reference driver is based on RealSense™ de-serialize board. For other de-serialize boards, modification might be needed.
 
 ### Links
-- Intel® RealSense™ camera driver for GMSL* interface [Front Page](./README.md)
+- RealSense™ camera driver for GMSL* interface [Front Page](./README.md)
 - Jetson AGX Orin™ board setup - AGX Orin™ [JetPack 6.x](./README_JP6.md) setup guide
 - Jetson AGX Xavier™ board setup - AGX Xavier™ [JetPack 5.x.2](./README_JP5.md) setup guide
 - Jetson AGX Xavier™ board setup - AGX Xavier™ [JetPack 4.6.1](./README_JP4.md) setup guide

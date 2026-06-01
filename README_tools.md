@@ -1,9 +1,9 @@
-# Intel® RealSense™ camera driver for GMSL* interface
+# RealSense™ camera driver for GMSL* interface
 
 # D457 MIPI on NVIDIA® Jetson AGX Xavier™ and AGX Orin™ build scripts manual pages
 
 ### Links
-- Intel® RealSense™ camera driver for GMSL* interface [Front Page](./README.md)
+- RealSense™ camera driver for GMSL* interface [Front Page](./README.md)
 - NVIDIA® Jetson AGX Orin™ board setup - AGX Orin™ [JetPack 6.x](./README_JP6.md) setup guide
 - NVIDIA® Jetson AGX Xavier™ board setup - AGX Xavier™ [JetPack 5.x.2](./README_JP5.md) setup guide
 - NVIDIA® Jetson AGX Xavier™ board setup - AGX Xavier™ [JetPack 4.6.1](./README_JP4.md) setup guide
@@ -46,7 +46,7 @@ Reset D457 patches (and any other changes) for kernel image, dtb and D457 driver
 ```
 
 Note: The `--one-cam` and `--dual-cam` option applies only for JetPack 5.0.2,
-compatible with adapter: https://store.intelrealsense.com/buy-intel-realsense-des457.html.
+compatible with RealSense™ deserializer.
 - By setting the `--one-cam` option it builds DT with only camera on GMSL link A (default).
 
 - By setting the `--dual-cam` option it builds DT with dual cameras on GMSL link A and B.
